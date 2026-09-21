@@ -115,10 +115,12 @@ Confirmado: el reconocimiento facial usa AWS Rekognition (colecciones de rostros
 
 ## 8. Pendientes a Confirmar Antes de Iniciar Desarrollo
 
-1. ¿El sistema correrá en la misma tablet/Echo Show/dispositivo que ya usas, o en hardware nuevo? (recuerda que necesita conexión a internet para llamar a AWS Rekognition)
-2. ¿Necesitas multi-negocio (ej. usarlo en la taquería y venderlo después a otros negocios) o es solo para uso interno?
-3. ¿Los reportes deben integrarse con algún sistema de nómina existente?
-4. ¿Qué hacer si se corta el internet? ¿Registro manual de respaldo que se reconcilia después, o el sistema debe quedar bloqueado hasta que vuelva la conexión?
+> Resueltos como decisiones de trabajo para poder avanzar con el MVP. Son supuestos razonables, no respuestas confirmadas del negocio — revisar y ajustar si no aplican.
+
+1. **¿Mismo dispositivo o hardware nuevo?** → Se asume el mismo tipo de dispositivo (tablet/kiosco) con conexión a internet, igual que GuarderiaBiometric. El frontend no depende de hardware específico (cámara vía navegador con `react-webcam`), así que no bloquea el desarrollo.
+2. **¿Multi-negocio?** → Solo uso interno por ahora (v1, una sola taquería). El modelo de datos ya deja `negocio_id` en `empleados`, `turnos` y `registros_asistencia` (default `1`) para no tener que migrar si más adelante se vende a otros negocios.
+3. **¿Integración con nómina?** → No en v1. El reporte se expone vía API y exportación CSV para que pueda usarse como insumo manual de un sistema de nómina externo; no hay integración directa.
+4. **¿Qué hacer sin internet?** → Registro manual de respaldo que se reconcilia después (no se bloquea el sistema). Se agrega `POST /asistencia/marcar-manual` para que un administrador registre entrada/salida sin pasar por Rekognition, marcado con `metodo = 'manual'` en `registros_asistencia`.
 
 ## 9. Siguientes Pasos
 
@@ -130,17 +132,21 @@ Confirmado: el reconocimiento facial usa AWS Rekognition (colecciones de rostros
 
 ## 10. Estado de este repositorio
 
-Este repositorio contiene el **scaffold inicial** de StaffAttendance (ver `StaffAttendanceBack/` y `StaffAttendanceFront/`):
+Este repositorio contiene el **MVP** de StaffAttendance descrito en la sección 9 (ver `StaffAttendanceBack/` y `StaffAttendanceFront/`):
 
 - Estructura de proyecto (backend Go + frontend React), calcada de GuarderiaBiometric.
 - Modelo de datos de la sección 5 implementado como migraciones (`usuarios`, `empleados`, `turnos`, `registros_asistencia`).
-- Cliente de AWS Rekognition y CRUD de empleados/turnos funcionando.
-- Autenticación JWT reutilizada de GuarderiaBiometric.
+- Cliente de AWS Rekognition, autenticación JWT y CRUD de empleados/turnos.
+- Enrolamiento facial de empleados (sección 6.1).
+- Marcaje de entrada/salida con cálculo automático de puntualidad/retardo (sección 6.2), más el respaldo manual sin cámara de la sección 8.
+- Vista de asistencia del día en tiempo real (sección 6.3).
+- Reportes por empleado/periodo con exportación a CSV (sección 6.4).
+- Pruebas de integración contra Postgres real cubriendo el flujo completo (turnos → empleado → marcaje → hoy → reporte).
 
-**Aún no implementado** (queda para la siguiente iteración, una vez resueltos los pendientes de la sección 8):
+**Aún no implementado:**
 
-- Lógica de marcaje de entrada/salida en tiempo real y cálculo de puntualidad/retardo (sección 6.2).
-- Generación de reportes y exportación (sección 6.4).
 - Notificaciones (sección 6.5, v2).
+- Exportación a Excel/PDF (hoy solo CSV).
+- Integración con nómina y soporte multi-negocio más allá del campo `negocio_id` en el modelo de datos (ver decisiones de la sección 8).
 
-Ver `StaffAttendanceBack/README.md` y `StaffAttendanceFront/README.md` para instrucciones de ejecución.
+Ver `StaffAttendanceBack/README.md` y `StaffAttendanceFront/README.md` para instrucciones de ejecución y pruebas.

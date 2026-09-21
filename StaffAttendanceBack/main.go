@@ -32,8 +32,18 @@ func main() {
 	if err != nil {
 		log.Fatalf("No se pudo inicializar el cliente de Rekognition: %v", err)
 	}
+	// No es fatal: si falla (credenciales de AWS aún no configuradas, problema
+	// de red puntual, o la colección ya existe de una corrida anterior), el
+	// servidor sigue arrancando. Solo bloquea a /empleados/:id/enrolar y
+	// /asistencia/marcar, que si necesitan la colección lista.
 	if err := rekClient.EnsureCollection(context.Background()); err != nil {
-		log.Fatalf("No se pudo preparar la colección de Rekognition: %v", err)
+		log.Printf("Aviso: no se pudo preparar la colección de Rekognition (%v); revisa las credenciales de AWS", err)
+	}
+
+	location, err := time.LoadLocation(cfg.Timezone)
+	if err != nil {
+		log.Printf("No se pudo cargar la zona horaria %q, usando UTC: %v", cfg.Timezone, err)
+		location = time.UTC
 	}
 
 	router := gin.Default()
@@ -55,7 +65,7 @@ func main() {
 
 	handlers.NewEmpleadosHandler(conn, rekClient).Register(protected)
 	handlers.NewTurnosHandler(conn).Register(protected)
-	handlers.NewAsistenciaHandler(conn, rekClient).Register(protected)
+	handlers.NewAsistenciaHandler(conn, rekClient, location, cfg.SimilarityThreshold).Register(protected)
 
 	log.Printf("StaffAttendance escuchando en el puerto %s", cfg.Port)
 	if err := router.Run(":" + cfg.Port); err != nil {

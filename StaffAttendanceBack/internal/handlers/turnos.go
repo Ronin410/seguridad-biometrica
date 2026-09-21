@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/lib/pq"
@@ -70,9 +71,14 @@ func (h *TurnosHandler) listar(c *gin.Context) {
 	turnos := []models.Turno{}
 	for rows.Next() {
 		var t models.Turno
-		if err := rows.Scan(&t.ID, &t.Nombre, &t.HoraEntrada, &t.HoraSalida, &t.ToleranciaRetardoMinutos, pq.Array(&t.DiasAplicables)); err != nil {
+		var horaEntrada, horaSalida time.Time
+		var dias pq.Int64Array
+		if err := rows.Scan(&t.ID, &t.Nombre, &horaEntrada, &horaSalida, &t.ToleranciaRetardoMinutos, &dias); err != nil {
 			continue
 		}
+		t.HoraEntrada = horaEntrada.Format("15:04:05")
+		t.HoraSalida = horaSalida.Format("15:04:05")
+		t.DiasAplicables = toIntSlice(dias)
 		turnos = append(turnos, t)
 	}
 

@@ -1,6 +1,9 @@
 package config
 
-import "os"
+import (
+	"os"
+	"strconv"
+)
 
 type Config struct {
 	Port                  string
@@ -8,6 +11,8 @@ type Config struct {
 	AWSRegion             string
 	RekognitionCollection string
 	JWTSecret             string
+	Timezone              string
+	SimilarityThreshold   float32
 }
 
 func Load() Config {
@@ -17,6 +22,8 @@ func Load() Config {
 		AWSRegion:             os.Getenv("AWS_REGION"),
 		RekognitionCollection: getEnv("REKOGNITION_COLLECTION_ID", "empleados-asistencia"),
 		JWTSecret:             os.Getenv("JWT_SECRET"),
+		Timezone:              getEnv("TZ_NEGOCIO", "America/Mazatlan"),
+		SimilarityThreshold:   getEnvFloat("SIMILARITY_THRESHOLD", 95.0),
 	}
 }
 
@@ -25,4 +32,16 @@ func getEnv(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func getEnvFloat(key string, fallback float32) float32 {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseFloat(value, 32)
+	if err != nil {
+		return fallback
+	}
+	return float32(parsed)
 }

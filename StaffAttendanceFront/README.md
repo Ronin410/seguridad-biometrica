@@ -1,12 +1,12 @@
 # StaffAttendance — Frontend
 
-Scaffold inicial del panel administrativo (React + Vite + Tailwind). Ver `../SPEC.md`.
+MVP del panel administrativo (React + Vite + Tailwind). Ver `../SPEC.md`.
 
 ## Estado
 
-Implementado: login, gestión de empleados (alta, baja/reactivación, enrolamiento facial vía webcam) y gestión de turnos.
+Implementado: login, gestión de empleados (alta, baja/reactivación, enrolamiento facial vía webcam), gestión de turnos, kiosco de marcaje (cámara + registro manual de respaldo) y reportes con exportación a CSV.
 
-Pendiente: kiosco de marcaje en tiempo real y reportes — ambos muestran una pantalla de "pendiente" hasta que el backend implemente esas rutas (ver `StaffAttendanceBack/README.md`).
+Pendiente: notificaciones (sección 6.5, v2) y exportación a Excel/PDF (hoy solo CSV).
 
 ## Ejecutar
 
