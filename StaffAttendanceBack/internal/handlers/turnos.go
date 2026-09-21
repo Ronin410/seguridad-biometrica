@@ -45,9 +45,9 @@ func (h *TurnosHandler) crear(c *gin.Context) {
 
 	var id int
 	err := h.DB.QueryRow(
-		`INSERT INTO turnos (nombre, hora_entrada, hora_salida, tolerancia_retardo_minutos, dias_aplicables)
-         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-		input.Nombre, input.HoraEntrada, input.HoraSalida, input.ToleranciaRetardoMinutos, pq.Array(input.DiasAplicables),
+		`INSERT INTO turnos (negocio_id, nombre, hora_entrada, hora_salida, tolerancia_retardo_minutos, dias_aplicables)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+		negocioID(c), input.Nombre, input.HoraEntrada, input.HoraSalida, input.ToleranciaRetardoMinutos, pq.Array(input.DiasAplicables),
 	).Scan(&id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "No se pudo crear el turno"})
@@ -60,7 +60,8 @@ func (h *TurnosHandler) crear(c *gin.Context) {
 func (h *TurnosHandler) listar(c *gin.Context) {
 	rows, err := h.DB.Query(
 		`SELECT id, nombre, hora_entrada, hora_salida, tolerancia_retardo_minutos, dias_aplicables
-         FROM turnos ORDER BY nombre ASC`,
+         FROM turnos WHERE negocio_id = $1 ORDER BY nombre ASC`,
+		negocioID(c),
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al consultar turnos"})

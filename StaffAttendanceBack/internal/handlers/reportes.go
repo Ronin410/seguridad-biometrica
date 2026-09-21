@@ -38,7 +38,7 @@ func (h *AsistenciaHandler) reporte(c *gin.Context) {
 		return
 	}
 
-	empleados, err := h.empleadosParaReporte(c.Query("empleado_id"))
+	empleados, err := h.empleadosParaReporte(negocioID(c), c.Query("empleado_id"))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al consultar empleados"})
 		return
@@ -125,18 +125,19 @@ func (h *AsistenciaHandler) reporte(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"inicio": inicio, "fin": fin, "empleados": reportes})
 }
 
-func (h *AsistenciaHandler) empleadosParaReporte(empleadoIDParam string) ([]reporteEmpleado, error) {
+func (h *AsistenciaHandler) empleadosParaReporte(negID int, empleadoIDParam string) ([]reporteEmpleado, error) {
 	query := `
 		SELECT e.id, e.nombre_completo, t.hora_entrada, t.hora_salida, t.dias_aplicables
 		FROM empleados e
-		LEFT JOIN turnos t ON e.turno_id = t.id`
-	args := []interface{}{}
+		LEFT JOIN turnos t ON e.turno_id = t.id
+		WHERE e.negocio_id = $1`
+	args := []interface{}{negID}
 	if empleadoIDParam != "" {
 		empleadoID, err := strconv.Atoi(empleadoIDParam)
 		if err != nil {
 			return nil, err
 		}
-		query += " WHERE e.id = $1"
+		query += " AND e.id = $2"
 		args = append(args, empleadoID)
 	}
 	query += " ORDER BY e.nombre_completo ASC"

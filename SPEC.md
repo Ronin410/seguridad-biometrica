@@ -19,8 +19,9 @@ Desarrollar un sistema independiente que utilice reconocimiento facial para regi
 **No incluye (fuera de alcance v1):**
 
 - Control de acceso físico (apertura de puertas/torniquetes).
-- Nómina/cálculo de pago (aunque el reporte puede servir como insumo).
-- Multi-sucursal (se deja como consideración futura en el modelo de datos).
+- Nómina/cálculo de pago (aunque el reporte puede servir como insumo — ver sección 8).
+
+**Multi-negocio:** confirmado en sección 8 — el sistema es multi-tenant desde el MVP (tabla `negocios`, un negocio por tablet/cuenta).
 
 ## 3. Componentes Reutilizables de GuarderiaBiometric
 
@@ -34,7 +35,7 @@ Desarrollar un sistema independiente que utilice reconocimiento facial para regi
 | Generador de reportes | Adaptar | Nuevas métricas: retardos, horas extra, ausencias |
 | Base de datos / modelos | Adaptar | Nuevo esquema de entidades (ver sección 5); mismo motor (Postgres/MySQL) que ya usa GuarderiaBiometric |
 
-Confirmado: el reconocimiento facial usa AWS Rekognition (colecciones de rostros vía IndexFaces/SearchFacesByImage), con backend en Go y frontend en React — mismo stack que GuarderiaBiometric. Se creará una colección de Rekognition separada (ej. `empleados-asistencia`) para no mezclar biometría de empleados con la de padres/niños.
+Confirmado: el reconocimiento facial usa AWS Rekognition (colecciones de rostros vía IndexFaces/SearchFacesByImage), con backend en Go y frontend en React — mismo stack que GuarderiaBiometric. Cada negocio tiene su propia colección de Rekognition (`empleados-asistencia-{negocio_id}`), igual que GuarderiaBiometric usa una colección por guardería (`guarderia-{id}`) — así nunca se mezcla biometría entre negocios.
 
 ## 4. Actores del Sistema
 
@@ -44,8 +45,19 @@ Confirmado: el reconocimiento facial usa AWS Rekognition (colecciones de rostros
 
 ## 5. Modelo de Datos (propuesto)
 
+**Negocio** (multi-negocio, sección 8)
+- id
+- nombre, slug
+- rekognition_collection_id (derivado de su id: `empleados-asistencia-{id}`)
+
+**Usuario** (admin/RH que opera el panel)
+- id
+- negocio_id
+- username, password_hash, rol
+
 **Empleado**
 - id
+- negocio_id
 - nombre completo
 - puesto / departamento
 - horario asignado (hora entrada, hora salida, días laborables)
@@ -55,6 +67,7 @@ Confirmado: el reconocimiento facial usa AWS Rekognition (colecciones de rostros
 
 **Turno / Horario**
 - id
+- negocio_id
 - nombre (ej. "Matutino", "Vespertino")
 - hora_entrada, hora_salida
 - tolerancia_retardo (minutos)
@@ -62,6 +75,7 @@ Confirmado: el reconocimiento facial usa AWS Rekognition (colecciones de rostros
 
 **RegistroAsistencia**
 - id
+- negocio_id
 - empleado_id
 - fecha
 - hora_entrada_real
@@ -109,18 +123,20 @@ Confirmado: el reconocimiento facial usa AWS Rekognition (colecciones de rostros
 - **Precisión del reconocimiento:** delegada a AWS Rekognition; usar el umbral de confianza (`SimilarityThreshold`) recomendado por AWS (ej. ≥95%) para minimizar falsos positivos/negativos.
 - **Velocidad:** depende de la latencia a AWS Rekognition (~1 seg típico); considerar red y ancho de banda del sitio.
 - **Privacidad/legal:** consentimiento del empleado para uso de datos biométricos (Ley Federal de Protección de Datos Personales en Posesión de los Particulares); datos biométricos procesados y almacenados en la nube de AWS (revisar región y política de retención de Rekognition).
-- **Disponibilidad:** requiere conexión a internet para el reconocimiento (a diferencia de un modelo local); definir un flujo de respaldo (registro manual) para cortes de conexión.
-- **Costo:** Rekognition cobra por llamada (IndexFaces, SearchFacesByImage) — estimar volumen mensual de marcajes para proyectar costo, relevante si se planea multi-negocio.
-- **Escalabilidad:** pensado inicialmente para un negocio pequeño/mediano (ej. la taquería), pero con modelo de datos y colecciones de Rekognition que permiten crecer a multi-negocio.
+- **Disponibilidad:** requiere conexión a internet para el reconocimiento (a diferencia de un modelo local). La PWA guarda localmente los marcajes manuales cuando no hay conexión y los sincroniza al reconectar (sección 8).
+- **Costo:** Rekognition cobra por llamada (IndexFaces, SearchFacesByImage) — con multi-negocio, estimar volumen mensual de marcajes por negocio para proyectar costo.
+- **Escalabilidad:** multi-negocio desde el MVP (sección 8) — cada negocio con su propia colección de Rekognition y sus datos aislados por `negocio_id`.
 
 ## 8. Pendientes a Confirmar Antes de Iniciar Desarrollo
 
-> Resueltos como decisiones de trabajo para poder avanzar con el MVP. Son supuestos razonables, no respuestas confirmadas del negocio — revisar y ajustar si no aplican.
+> Respondidas por el negocio.
 
-1. **¿Mismo dispositivo o hardware nuevo?** → Se asume el mismo tipo de dispositivo (tablet/kiosco) con conexión a internet, igual que GuarderiaBiometric. El frontend no depende de hardware específico (cámara vía navegador con `react-webcam`), así que no bloquea el desarrollo.
-2. **¿Multi-negocio?** → Solo uso interno por ahora (v1, una sola taquería). El modelo de datos ya deja `negocio_id` en `empleados`, `turnos` y `registros_asistencia` (default `1`) para no tener que migrar si más adelante se vende a otros negocios.
-3. **¿Integración con nómina?** → No en v1. El reporte se expone vía API y exportación CSV para que pueda usarse como insumo manual de un sistema de nómina externo; no hay integración directa.
-4. **¿Qué hacer sin internet?** → Registro manual de respaldo que se reconcilia después (no se bloquea el sistema). Se agrega `POST /asistencia/marcar-manual` para que un administrador registre entrada/salida sin pasar por Rekognition, marcado con `metodo = 'manual'` en `registros_asistencia`.
+1. **¿Mismo dispositivo o hardware nuevo?** → Es una **PWA** que correrá en **distintas tablets** (no un dispositivo único). Necesita internet para llegar al backend y a AWS Rekognition; se instala como app (manifest + service worker) para poder abrirse en modo kiosco en cualquier tablet.
+2. **¿Multi-negocio?** → **Sí.** El sistema es multi-negocio desde ya: tabla `negocios`, cada `usuario` pertenece a un negocio (`negocio_id` en el JWT), todas las consultas de empleados/turnos/asistencia/reportes se filtran por ese negocio, y cada negocio tiene su propia colección de Rekognition (`empleados-asistencia-{negocio_id}`) para no mezclar biometría entre negocios — mismo patrón que GuarderiaBiometric usa por guardería.
+3. **¿Integración con nómina?** → No por ahora, queda **a futuro**. El reporte se expone vía API y exportación CSV como insumo manual.
+4. **¿Qué hacer sin internet?** → Dos escenarios distintos:
+   - Falla Rekognition pero la tablet sí llega al backend: ya cubierto con `POST /asistencia/marcar-manual` (un admin registra el marcaje sin cámara).
+   - Se cae el internet por completo (la tablet no llega ni al backend): la PWA guarda el marcaje manual **localmente en el dispositivo** (con la hora real de captura) y lo sincroniza solo cuando vuelve la conexión, mostrando "guardado localmente, pendiente de sincronizar" mientras tanto. No se bloquea el registro de asistencia por un corte de internet.
 
 ## 9. Siguientes Pasos
 
@@ -132,21 +148,23 @@ Confirmado: el reconocimiento facial usa AWS Rekognition (colecciones de rostros
 
 ## 10. Estado de este repositorio
 
-Este repositorio contiene el **MVP** de StaffAttendance descrito en la sección 9 (ver `StaffAttendanceBack/` y `StaffAttendanceFront/`):
+Este repositorio contiene el **MVP** de StaffAttendance descrito en la sección 9, ya multi-negocio (ver `StaffAttendanceBack/` y `StaffAttendanceFront/`):
 
-- Estructura de proyecto (backend Go + frontend React), calcada de GuarderiaBiometric.
-- Modelo de datos de la sección 5 implementado como migraciones (`usuarios`, `empleados`, `turnos`, `registros_asistencia`).
-- Cliente de AWS Rekognition, autenticación JWT y CRUD de empleados/turnos.
-- Enrolamiento facial de empleados (sección 6.1).
-- Marcaje de entrada/salida con cálculo automático de puntualidad/retardo (sección 6.2), más el respaldo manual sin cámara de la sección 8.
+- Estructura de proyecto (backend Go + frontend React/PWA), calcada de GuarderiaBiometric.
+- **Multi-negocio** (sección 8): tabla `negocios`, alta de negocio + admin en un solo paso (`POST /negocios` / pantalla "Crear cuenta" del login), `negocio_id` en el JWT, y todos los datos (empleados, turnos, asistencia, reportes) aislados por negocio — con su propia colección de Rekognition cada uno.
+- Modelo de datos de la sección 5 implementado como migraciones.
+- Autenticación JWT, CRUD de empleados/turnos, enrolamiento facial (sección 6.1).
+- Marcaje de entrada/salida con cálculo automático de puntualidad/retardo (sección 6.2).
+- Respaldo manual (sección 8): sin cámara si falla Rekognition, o para sincronizar marcajes que la PWA guardó localmente cuando la tablet se quedó sin internet — con la hora real de captura, no la de sincronización.
+- PWA instalable (manifest + service worker) para correr en distintas tablets, con caché del shell para que el kiosco abra sin conexión.
 - Vista de asistencia del día en tiempo real (sección 6.3).
 - Reportes por empleado/periodo con exportación a CSV (sección 6.4).
-- Pruebas de integración contra Postgres real cubriendo el flujo completo (turnos → empleado → marcaje → hoy → reporte).
+- Pruebas de integración contra Postgres real: flujo completo, puntualidad/retardo, aislamiento entre negocios, y sincronización offline.
 
 **Aún no implementado:**
 
 - Notificaciones (sección 6.5, v2).
 - Exportación a Excel/PDF (hoy solo CSV).
-- Integración con nómina y soporte multi-negocio más allá del campo `negocio_id` en el modelo de datos (ver decisiones de la sección 8).
+- Integración con nómina (sección 8: a futuro).
 
 Ver `StaffAttendanceBack/README.md` y `StaffAttendanceFront/README.md` para instrucciones de ejecución y pruebas.

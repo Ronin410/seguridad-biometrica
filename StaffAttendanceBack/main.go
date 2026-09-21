@@ -28,16 +28,12 @@ func main() {
 		log.Fatalf("No se pudieron ejecutar las migraciones: %v", err)
 	}
 
-	rekClient, err := rekognition.NewClient(context.Background(), cfg.AWSRegion, cfg.RekognitionCollection)
+	// El cliente no fija una sola colección: el sistema es multi-negocio
+	// (SPEC.md sección 8) y cada negocio tiene la suya, creada al darse de
+	// alta en /negocios (o de forma perezosa al enrolar el primer empleado).
+	rekClient, err := rekognition.NewClient(context.Background(), cfg.AWSRegion)
 	if err != nil {
 		log.Fatalf("No se pudo inicializar el cliente de Rekognition: %v", err)
-	}
-	// No es fatal: si falla (credenciales de AWS aún no configuradas, problema
-	// de red puntual, o la colección ya existe de una corrida anterior), el
-	// servidor sigue arrancando. Solo bloquea a /empleados/:id/enrolar y
-	// /asistencia/marcar, que si necesitan la colección lista.
-	if err := rekClient.EnsureCollection(context.Background()); err != nil {
-		log.Printf("Aviso: no se pudo preparar la colección de Rekognition (%v); revisa las credenciales de AWS", err)
 	}
 
 	location, err := time.LoadLocation(cfg.Timezone)
@@ -57,12 +53,15 @@ func main() {
 
 	jwtSecret := []byte(cfg.JWTSecret)
 
+	handlers.NewNegociosHandler(conn, rekClient, jwtSecret).Register(router)
+
 	authHandler := handlers.NewAuthHandler(conn, jwtSecret)
-	authHandler.Register(router)
+	authHandler.RegisterPublic(router)
 
 	protected := router.Group("/")
 	protected.Use(middleware.Auth(jwtSecret))
 
+	authHandler.RegisterProtected(protected)
 	handlers.NewEmpleadosHandler(conn, rekClient).Register(protected)
 	handlers.NewTurnosHandler(conn).Register(protected)
 	handlers.NewAsistenciaHandler(conn, rekClient, location, cfg.SimilarityThreshold).Register(protected)

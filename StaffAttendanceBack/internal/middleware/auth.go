@@ -9,13 +9,16 @@ import (
 )
 
 type Claims struct {
-	UserID int    `json:"user_id"`
-	Rol    string `json:"rol"`
+	UserID    int    `json:"user_id"`
+	NegocioID int    `json:"negocio_id"`
+	Rol       string `json:"rol"`
 	jwt.RegisteredClaims
 }
 
 // Auth reutiliza el esquema JWT de GuarderiaBiometric: valida el header
-// Authorization y expone user_id/rol en el contexto de Gin.
+// Authorization y expone user_id/negocio_id/rol en el contexto de Gin. El
+// negocio_id es lo que aísla los datos de cada negocio (multi-negocio,
+// SPEC.md sección 8).
 func Auth(jwtSecret []byte) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
@@ -36,6 +39,7 @@ func Auth(jwtSecret []byte) gin.HandlerFunc {
 		}
 
 		c.Set("user_id", claims.UserID)
+		c.Set("negocio_id", claims.NegocioID)
 		c.Set("rol", claims.Rol)
 		c.Next()
 	}

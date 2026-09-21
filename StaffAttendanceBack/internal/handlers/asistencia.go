@@ -70,19 +70,20 @@ func (h *AsistenciaHandler) marcar(c *gin.Context) {
 		return
 	}
 
-	faceID, similarity, err := h.Rek.SearchFace(c.Request.Context(), imageBytes, h.SimilarityThreshold)
+	negID := negocioID(c)
+	faceID, similarity, err := h.Rek.SearchFace(c.Request.Context(), rekognition.CollectionID(negID), imageBytes, h.SimilarityThreshold)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Rostro no reconocido"})
 		return
 	}
 
-	empleado, err := h.buscarEmpleadoPorFaceID(faceID)
+	empleado, err := h.buscarEmpleado("e.rekognition_face_id = $1 AND e.estado = 'activo' AND e.negocio_id = $2", faceID, negID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Empleado no encontrado o inactivo"})
 		return
 	}
 
-	tipo, estado, horaReal, err := h.registrarMarcaje(empleado, "facial", "")
+	tipo, estado, horaReal, err := h.registrarMarcaje(empleado, negID, "facial", "", nil)
 	if err != nil {
 		respondMarcajeError(c, err)
 		return
@@ -99,25 +100,38 @@ func (h *AsistenciaHandler) marcar(c *gin.Context) {
 	})
 }
 
-// marcarManual es el respaldo de la sección 8 cuando no hay internet para
-// llamar a Rekognition: un administrador registra el marcaje a mano.
+// marcarManual es el respaldo de la sección 8 cuando falla Rekognition (o,
+// con capturado_en, cuando la PWA sincroniza un marcaje que se guardó
+// localmente porque la tablet se quedó sin internet).
 func (h *AsistenciaHandler) marcarManual(c *gin.Context) {
 	var input struct {
-		EmpleadoID int    `json:"empleado_id" binding:"required"`
-		Tipo       string `json:"tipo" binding:"required"`
+		EmpleadoID  int    `json:"empleado_id" binding:"required"`
+		Tipo        string `json:"tipo" binding:"required"`
+		CapturadoEn string `json:"capturado_en"`
 	}
 	if err := c.ShouldBindJSON(&input); err != nil || (input.Tipo != "entrada" && input.Tipo != "salida") {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Datos inválidos, tipo debe ser 'entrada' o 'salida'"})
 		return
 	}
 
-	empleado, err := h.buscarEmpleadoPorID(input.EmpleadoID)
+	var horaOverride *time.Time
+	if input.CapturadoEn != "" {
+		parsed, err := time.Parse(time.RFC3339, input.CapturadoEn)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "capturado_en debe ser una fecha ISO 8601 válida"})
+			return
+		}
+		horaOverride = &parsed
+	}
+
+	negID := negocioID(c)
+	empleado, err := h.buscarEmpleado("e.id = $1 AND e.negocio_id = $2", input.EmpleadoID, negID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Empleado no encontrado"})
 		return
 	}
 
-	tipo, estado, horaReal, err := h.registrarMarcaje(empleado, "manual", input.Tipo)
+	tipo, estado, horaReal, err := h.registrarMarcaje(empleado, negID, "manual", input.Tipo, horaOverride)
 	if err != nil {
 		respondMarcajeError(c, err)
 		return
@@ -132,15 +146,7 @@ func (h *AsistenciaHandler) marcarManual(c *gin.Context) {
 	})
 }
 
-func (h *AsistenciaHandler) buscarEmpleadoPorFaceID(faceID string) (*empleadoInfo, error) {
-	return h.buscarEmpleado("e.rekognition_face_id = $1 AND e.estado = 'activo'", faceID)
-}
-
-func (h *AsistenciaHandler) buscarEmpleadoPorID(empleadoID int) (*empleadoInfo, error) {
-	return h.buscarEmpleado("e.id = $1", empleadoID)
-}
-
-func (h *AsistenciaHandler) buscarEmpleado(whereClause string, arg interface{}) (*empleadoInfo, error) {
+func (h *AsistenciaHandler) buscarEmpleado(whereClause string, args ...interface{}) (*empleadoInfo, error) {
 	var e empleadoInfo
 	var turnoID sql.NullInt64
 	var horaEntrada, horaSalida sql.NullTime
@@ -153,7 +159,7 @@ func (h *AsistenciaHandler) buscarEmpleado(whereClause string, arg interface{}) 
 		LEFT JOIN turnos t ON e.turno_id = t.id
 		WHERE %s`, whereClause)
 
-	err := h.DB.QueryRow(query, arg).Scan(
+	err := h.DB.QueryRow(query, args...).Scan(
 		&e.id, &e.nombre, &turnoID, &horaEntrada, &horaSalida, &toleranciaMin, &diasAplicables,
 	)
 	if err != nil {
@@ -183,9 +189,15 @@ func respondMarcajeError(c *gin.Context, err error) {
 }
 
 // registrarMarcaje decide el tipo (si tipoForzado viene vacío), calcula la
-// puntualidad contra el turno asignado y guarda el registro.
-func (h *AsistenciaHandler) registrarMarcaje(empleado *empleadoInfo, metodo, tipoForzado string) (tipo, estado string, horaReal time.Time, err error) {
+// puntualidad contra el turno asignado y guarda el registro. horaOverride
+// permite registrar con la hora real de captura en vez de "ahora" — lo usa
+// la sincronización de marcajes guardados offline en la PWA (SPEC.md
+// sección 8).
+func (h *AsistenciaHandler) registrarMarcaje(empleado *empleadoInfo, negID int, metodo, tipoForzado string, horaOverride *time.Time) (tipo, estado string, horaReal time.Time, err error) {
 	ahora := time.Now().In(h.Location)
+	if horaOverride != nil {
+		ahora = horaOverride.In(h.Location)
+	}
 	fecha := ahora.Format("2006-01-02")
 
 	ultimoTipo, ultimaHora, existeUltimo, err := h.ultimoRegistroHoy(empleado.id, fecha)
@@ -219,9 +231,9 @@ func (h *AsistenciaHandler) registrarMarcaje(empleado *empleadoInfo, metodo, tip
 	}
 
 	_, err = h.DB.Exec(
-		`INSERT INTO registros_asistencia (empleado_id, fecha, hora_real, tipo, estado, metodo)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-		empleado.id, fecha, ahora, tipo, estadoValue, metodo,
+		`INSERT INTO registros_asistencia (negocio_id, empleado_id, fecha, hora_real, tipo, estado, metodo)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		negID, empleado.id, fecha, ahora, tipo, estadoValue, metodo,
 	)
 	if err != nil {
 		return "", "", time.Time{}, err
@@ -309,8 +321,8 @@ func (h *AsistenciaHandler) hoy(c *gin.Context) {
 			WHERE empleado_id = e.id AND fecha = $1
 			ORDER BY hora_real DESC LIMIT 1
 		) r ON true
-		WHERE e.estado = 'activo'
-		ORDER BY e.nombre_completo ASC`, fecha)
+		WHERE e.estado = 'activo' AND e.negocio_id = $2
+		ORDER BY e.nombre_completo ASC`, fecha, negocioID(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al consultar asistencia de hoy"})
 		return

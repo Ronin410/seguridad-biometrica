@@ -1,6 +1,18 @@
 package handlers
 
-import "github.com/lib/pq"
+import (
+	"github.com/gin-gonic/gin"
+	"github.com/lib/pq"
+)
+
+// negocioID lee el negocio_id que el middleware de auth deja en el contexto
+// (viene del JWT). Todas las consultas de datos de negocio se filtran por
+// este valor para aislar los datos entre negocios (SPEC.md sección 8).
+func negocioID(c *gin.Context) int {
+	value, _ := c.Get("negocio_id")
+	id, _ := value.(int)
+	return id
+}
 
 // pq's GenericArray only implements Scan for element types with an explicit
 // sql.Scanner, so a smallint[] column can't be scanned directly into a plain

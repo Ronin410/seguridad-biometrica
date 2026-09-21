@@ -6,13 +6,21 @@ import (
 	"log"
 )
 
-// RunMigrations crea el esquema descrito en SPEC.md sección 5. Incluye
-// negocio_id (default 1) en las tablas de dominio para dejar la puerta
-// abierta a multi-negocio sin tener que migrar de nuevo (SPEC.md sección 2).
+// RunMigrations crea el esquema descrito en SPEC.md sección 5. El sistema es
+// multi-negocio desde el MVP (sección 8): todo cuelga de `negocios`, y cada
+// negocio tiene su propia colección de Rekognition.
 func RunMigrations(conn *sql.DB) error {
 	queries := []string{
+		`CREATE TABLE IF NOT EXISTS negocios (
+			id SERIAL PRIMARY KEY,
+			nombre VARCHAR(150) NOT NULL,
+			slug VARCHAR(60) UNIQUE NOT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		);`,
+
 		`CREATE TABLE IF NOT EXISTS usuarios (
 			id SERIAL PRIMARY KEY,
+			negocio_id INTEGER NOT NULL REFERENCES negocios(id) ON DELETE CASCADE,
 			username VARCHAR(50) UNIQUE NOT NULL,
 			password_hash TEXT NOT NULL,
 			rol VARCHAR(20) NOT NULL DEFAULT 'admin' CHECK (rol IN ('admin', 'rh')),
@@ -21,7 +29,7 @@ func RunMigrations(conn *sql.DB) error {
 
 		`CREATE TABLE IF NOT EXISTS turnos (
 			id SERIAL PRIMARY KEY,
-			negocio_id INTEGER NOT NULL DEFAULT 1,
+			negocio_id INTEGER NOT NULL REFERENCES negocios(id) ON DELETE CASCADE,
 			nombre VARCHAR(100) NOT NULL,
 			hora_entrada TIME NOT NULL,
 			hora_salida TIME NOT NULL,
@@ -32,7 +40,7 @@ func RunMigrations(conn *sql.DB) error {
 
 		`CREATE TABLE IF NOT EXISTS empleados (
 			id SERIAL PRIMARY KEY,
-			negocio_id INTEGER NOT NULL DEFAULT 1,
+			negocio_id INTEGER NOT NULL REFERENCES negocios(id) ON DELETE CASCADE,
 			nombre_completo VARCHAR(150) NOT NULL,
 			puesto VARCHAR(100),
 			departamento VARCHAR(100),
@@ -44,7 +52,7 @@ func RunMigrations(conn *sql.DB) error {
 
 		`CREATE TABLE IF NOT EXISTS registros_asistencia (
 			id SERIAL PRIMARY KEY,
-			negocio_id INTEGER NOT NULL DEFAULT 1,
+			negocio_id INTEGER NOT NULL REFERENCES negocios(id) ON DELETE CASCADE,
 			empleado_id INTEGER NOT NULL REFERENCES empleados(id) ON DELETE CASCADE,
 			fecha DATE NOT NULL DEFAULT CURRENT_DATE,
 			hora_real TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -54,6 +62,8 @@ func RunMigrations(conn *sql.DB) error {
 		);`,
 
 		`CREATE INDEX IF NOT EXISTS idx_registros_asistencia_empleado_fecha ON registros_asistencia (empleado_id, fecha);`,
+		`CREATE INDEX IF NOT EXISTS idx_empleados_negocio ON empleados (negocio_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_turnos_negocio ON turnos (negocio_id);`,
 	}
 
 	for _, query := range queries {

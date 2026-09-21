@@ -15,15 +15,25 @@ const TABS = [
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(() => !!localStorage.getItem('token'));
+  const [negocioNombre, setNegocioNombre] = useState(() => localStorage.getItem('negocio_nombre') || '');
   const [tab, setTab] = useState('kiosco');
 
   const cerrarSesion = () => {
     localStorage.removeItem('token');
+    localStorage.removeItem('negocio_nombre');
     setIsLoggedIn(false);
   };
 
+  const handleLogin = (data) => {
+    if (data?.negocio_nombre) {
+      localStorage.setItem('negocio_nombre', data.negocio_nombre);
+      setNegocioNombre(data.negocio_nombre);
+    }
+    setIsLoggedIn(true);
+  };
+
   if (!isLoggedIn) {
-    return <Login onLogin={() => setIsLoggedIn(true)} />;
+    return <Login onLogin={handleLogin} />;
   }
 
   const ActiveComponent = TABS.find((t) => t.id === tab)?.component ?? Kiosco;
@@ -33,7 +43,10 @@ export default function App() {
       <header className="flex flex-col items-center mb-8 border-b border-slate-200 pb-6 gap-6 w-full">
         <div className="flex items-center gap-3">
           <div className="bg-teal-700 p-2 rounded-xl shadow-md"><ShieldCheck size={20} className="text-white" /></div>
-          <h1 className="text-xl font-black uppercase leading-none text-slate-900">StaffAttendance</h1>
+          <div className="text-center sm:text-left">
+            <h1 className="text-xl font-black uppercase leading-none text-slate-900">StaffAttendance</h1>
+            {negocioNombre && <p className="text-[9px] text-teal-700 font-bold uppercase tracking-widest">{negocioNombre}</p>}
+          </div>
         </div>
 
         <nav className="w-full max-w-full overflow-x-auto">

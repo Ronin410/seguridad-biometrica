@@ -42,9 +42,9 @@ func (h *EmpleadosHandler) crear(c *gin.Context) {
 
 	var id int
 	err := h.DB.QueryRow(
-		`INSERT INTO empleados (nombre_completo, puesto, departamento, turno_id)
-         VALUES ($1, $2, $3, $4) RETURNING id`,
-		input.NombreCompleto, input.Puesto, input.Departamento, input.TurnoID,
+		`INSERT INTO empleados (negocio_id, nombre_completo, puesto, departamento, turno_id)
+         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+		negocioID(c), input.NombreCompleto, input.Puesto, input.Departamento, input.TurnoID,
 	).Scan(&id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "No se pudo crear el empleado"})
@@ -58,7 +58,8 @@ func (h *EmpleadosHandler) listar(c *gin.Context) {
 	rows, err := h.DB.Query(
 		`SELECT id, nombre_completo, puesto, departamento, turno_id, estado,
                 COALESCE(rekognition_face_id, ''), fecha_alta
-         FROM empleados ORDER BY nombre_completo ASC`,
+         FROM empleados WHERE negocio_id = $1 ORDER BY nombre_completo ASC`,
+		negocioID(c),
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al consultar empleados"})
@@ -89,7 +90,7 @@ func (h *EmpleadosHandler) cambiarEstado(c *gin.Context) {
 		return
 	}
 
-	result, err := h.DB.Exec(`UPDATE empleados SET estado = $1 WHERE id = $2`, input.Estado, empleadoID)
+	result, err := h.DB.Exec(`UPDATE empleados SET estado = $1 WHERE id = $2 AND negocio_id = $3`, input.Estado, empleadoID, negocioID(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "No se pudo actualizar el estado"})
 		return
@@ -125,20 +126,29 @@ func (h *EmpleadosHandler) enrolar(c *gin.Context) {
 		return
 	}
 
+	negID := negocioID(c)
 	var nombreCompleto string
-	if err := h.DB.QueryRow(`SELECT nombre_completo FROM empleados WHERE id = $1`, empleadoID).Scan(&nombreCompleto); err != nil {
+	if err := h.DB.QueryRow(`SELECT nombre_completo FROM empleados WHERE id = $1 AND negocio_id = $2`, empleadoID, negID).Scan(&nombreCompleto); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Empleado no encontrado"})
 		return
 	}
 
+	collectionID := rekognition.CollectionID(negID)
+	// Por si la colección no se pudo crear cuando se dio de alta el negocio
+	// (p. ej. credenciales de AWS aún no configuradas); es idempotente.
+	if err := h.Rek.EnsureCollection(c.Request.Context(), collectionID); err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Rekognition no está disponible: " + err.Error()})
+		return
+	}
+
 	externalImageID := strings.ReplaceAll(nombreCompleto, " ", "_") + "_" + empleadoID
-	faceID, err := h.Rek.IndexFace(c.Request.Context(), imageBytes, externalImageID)
+	faceID, err := h.Rek.IndexFace(c.Request.Context(), collectionID, imageBytes, externalImageID)
 	if err != nil {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
 		return
 	}
 
-	_, err = h.DB.Exec(`UPDATE empleados SET rekognition_face_id = $1 WHERE id = $2`, faceID, empleadoID)
+	_, err = h.DB.Exec(`UPDATE empleados SET rekognition_face_id = $1 WHERE id = $2 AND negocio_id = $3`, faceID, empleadoID, negID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "No se pudo guardar el rostro del empleado"})
 		return

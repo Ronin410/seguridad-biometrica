@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import Webcam from 'react-webcam';
-import { ScanEye, RefreshCw, CheckCircle, AlertCircle, Wrench } from 'lucide-react';
+import { ScanEye, RefreshCw, CheckCircle, AlertCircle, Wrench, CloudOff, CloudUpload } from 'lucide-react';
 import api from '../axiosConfig';
+import { encolarMarcaje, contarPendientes, sincronizarCola } from '../offlineQueue';
 
 export default function Kiosco() {
   const webcamRef = useRef(null);
@@ -9,6 +10,8 @@ export default function Kiosco() {
   const [resultado, setResultado] = useState(null);
   const [hoy, setHoy] = useState([]);
   const [mostrarManual, setMostrarManual] = useState(false);
+  const [pendientes, setPendientes] = useState(() => contarPendientes());
+  const [sincronizando, setSincronizando] = useState(false);
 
   const cargarHoy = async () => {
     try {
@@ -19,9 +22,24 @@ export default function Kiosco() {
     }
   };
 
+  const sincronizar = useCallback(async () => {
+    if (contarPendientes() === 0) return;
+    setSincronizando(true);
+    try {
+      const { sincronizados } = await sincronizarCola(api);
+      setPendientes(contarPendientes());
+      if (sincronizados > 0) cargarHoy();
+    } finally {
+      setSincronizando(false);
+    }
+  }, []);
+
   useEffect(() => {
     cargarHoy();
-  }, []);
+    sincronizar();
+    window.addEventListener('online', sincronizar);
+    return () => window.removeEventListener('online', sincronizar);
+  }, [sincronizar]);
 
   const escanear = async () => {
     if (!webcamRef.current) return;
@@ -68,12 +86,25 @@ export default function Kiosco() {
           {loading ? 'Procesando...' : 'Marcar entrada / salida'}
         </button>
 
-        <button
-          onClick={() => setMostrarManual(true)}
-          className="text-xs font-bold uppercase text-slate-400 flex items-center gap-2 hover:text-slate-600"
-        >
-          <Wrench size={14} /> Sin conexión: registrar manualmente
-        </button>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => setMostrarManual(true)}
+            className="text-xs font-bold uppercase text-slate-400 flex items-center gap-2 hover:text-slate-600"
+          >
+            <Wrench size={14} /> Sin conexión: registrar manualmente
+          </button>
+          {pendientes > 0 && (
+            <button
+              onClick={sincronizar}
+              disabled={sincronizando}
+              className="text-xs font-bold uppercase text-amber-600 flex items-center gap-2 hover:text-amber-700"
+              title="Reintentar sincronización ahora"
+            >
+              {sincronizando ? <RefreshCw size={14} className="animate-spin" /> : <CloudOff size={14} />}
+              {pendientes} pendiente{pendientes === 1 ? '' : 's'}
+            </button>
+          )}
+        </div>
 
         {resultado && (
           <div
@@ -83,7 +114,11 @@ export default function Kiosco() {
           >
             {resultado.type === 'success' ? (
               <div className="flex items-start gap-3">
-                <CheckCircle className="text-emerald-500 shrink-0" size={24} />
+                {resultado.offline ? (
+                  <CloudUpload className="text-amber-500 shrink-0" size={24} />
+                ) : (
+                  <CheckCircle className="text-emerald-500 shrink-0" size={24} />
+                )}
                 <div>
                   <p className="font-black text-slate-900">{resultado.data.mensaje}</p>
                   <p className="text-xs font-bold uppercase tracking-widest mt-1 text-slate-400">
@@ -141,9 +176,10 @@ export default function Kiosco() {
       {mostrarManual && (
         <RegistroManualModal
           onClose={() => setMostrarManual(false)}
-          onRegistrado={() => {
+          onRegistrado={(offline) => {
             setMostrarManual(false);
-            cargarHoy();
+            setPendientes(contarPendientes());
+            if (!offline) cargarHoy();
           }}
         />
       )}
@@ -167,9 +203,18 @@ function RegistroManualModal({ onClose, onRegistrado }) {
     setEnviando(true);
     try {
       await api.post('/asistencia/marcar-manual', { empleado_id: Number(empleadoId), tipo });
-      onRegistrado();
+      onRegistrado(false);
     } catch (err) {
-      alert(err.response?.data?.error || 'No se pudo registrar');
+      if (!err.response) {
+        // Sin respuesta del servidor: no hay red. Se guarda localmente en
+        // vez de perder el marcaje (SPEC.md sección 8).
+        const empleado = empleados.find((e) => e.id === Number(empleadoId));
+        encolarMarcaje({ empleadoId: Number(empleadoId), nombre: empleado?.nombre_completo, tipo });
+        alert('Sin conexión: el marcaje se guardó en este dispositivo y se sincronizará solo cuando vuelva el internet.');
+        onRegistrado(true);
+      } else {
+        alert(err.response?.data?.error || 'No se pudo registrar');
+      }
     } finally {
       setEnviando(false);
     }
@@ -179,7 +224,9 @@ function RegistroManualModal({ onClose, onRegistrado }) {
     <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
       <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl p-6">
         <h3 className="text-lg font-black uppercase text-slate-900 mb-1">Registro manual</h3>
-        <p className="text-xs text-slate-400 mb-6">Úsalo solo si la cámara o la conexión a internet fallan.</p>
+        <p className="text-xs text-slate-400 mb-6">
+          Úsalo si la cámara o Rekognition fallan. Si tampoco hay internet, se guarda en este dispositivo y se sincroniza solo.
+        </p>
         <form onSubmit={registrar} className="space-y-4">
           <select
             value={empleadoId}
