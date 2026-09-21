@@ -16,11 +16,11 @@ import (
 
 type NegociosHandler struct {
 	DB        *sql.DB
-	Rek       *rekognition.Client
+	Rek       rekognition.FaceRecognizer
 	JWTSecret []byte
 }
 
-func NewNegociosHandler(db *sql.DB, rek *rekognition.Client, jwtSecret []byte) *NegociosHandler {
+func NewNegociosHandler(db *sql.DB, rek rekognition.FaceRecognizer, jwtSecret []byte) *NegociosHandler {
 	return &NegociosHandler{DB: db, Rek: rek, JWTSecret: jwtSecret}
 }
 

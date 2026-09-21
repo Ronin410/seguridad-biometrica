@@ -2,8 +2,8 @@ package handlers
 
 import (
 	"bytes"
-	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -25,9 +25,10 @@ var testJWTSecret = []byte("test-secret")
 // setupRouter conecta a un Postgres real (TEST_DATABASE_URL o el default de
 // desarrollo local), corre las migraciones, limpia las tablas y arma el
 // router completo (negocios, auth, empleados, turnos, asistencia) con el
-// middleware de auth real — todo excepto lo que necesita una llamada real a
-// AWS Rekognition (/asistencia/marcar y /empleados/:id/enrolar).
-func setupRouter(t *testing.T) (*gin.Engine, *sql.DB) {
+// middleware de auth real. rek es el FaceRecognizer a usar — en las pruebas
+// siempre un doble simulado (fakeRekognition), nunca el cliente real de AWS,
+// para no depender de credenciales ni de red.
+func setupRouter(t *testing.T, rek rekognition.FaceRecognizer) (*gin.Engine, *sql.DB) {
 	t.Helper()
 
 	dsn := os.Getenv("TEST_DATABASE_URL")
@@ -50,17 +51,12 @@ func setupRouter(t *testing.T) (*gin.Engine, *sql.DB) {
 		}
 	}
 
-	rekClient, err := rekognition.NewClient(context.Background(), "us-east-1")
-	if err != nil {
-		t.Fatalf("no se pudo crear el cliente de rekognition: %v", err)
-	}
-
 	loc, _ := time.LoadLocation("America/Mazatlan")
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 
-	NewNegociosHandler(conn, rekClient, testJWTSecret).Register(router)
+	NewNegociosHandler(conn, rek, testJWTSecret).Register(router)
 
 	authHandler := NewAuthHandler(conn, testJWTSecret)
 	authHandler.RegisterPublic(router)
@@ -69,8 +65,8 @@ func setupRouter(t *testing.T) (*gin.Engine, *sql.DB) {
 	protected.Use(middleware.Auth(testJWTSecret))
 	authHandler.RegisterProtected(protected)
 	NewTurnosHandler(conn).Register(protected)
-	NewEmpleadosHandler(conn, rekClient).Register(protected)
-	NewAsistenciaHandler(conn, rekClient, loc, 95).Register(protected)
+	NewEmpleadosHandler(conn, rek).Register(protected)
+	NewAsistenciaHandler(conn, rek, loc, 95).Register(protected)
 
 	return router, conn
 }
@@ -129,7 +125,7 @@ func decode(t *testing.T, rec *httptest.ResponseRecorder, target interface{}) {
 }
 
 func TestFlujoCompletoAsistencia(t *testing.T) {
-	router, _ := setupRouter(t)
+	router, _ := setupRouter(t, nuevoFakeRekognitionAutorizado())
 	token := crearNegocio(t, router, "Taqueria")
 
 	// 1. Crear un turno cuya hora_entrada quedó hace 2 horas, con 5 min de
@@ -239,7 +235,7 @@ func TestFlujoCompletoAsistencia(t *testing.T) {
 }
 
 func TestListarTurnosDevuelveDiasAplicablesYHoraPlano(t *testing.T) {
-	router, _ := setupRouter(t)
+	router, _ := setupRouter(t, nuevoFakeRekognitionAutorizado())
 	token := crearNegocio(t, router, "Taqueria")
 
 	doJSON(t, router, token, http.MethodPost, "/turnos", map[string]interface{}{
@@ -280,7 +276,7 @@ func TestListarTurnosDevuelveDiasAplicablesYHoraPlano(t *testing.T) {
 // usando el endpoint real (no la función en aislado), para que cubra también
 // el bug de decodificación de columnas TIME al leer el turno desde la BD.
 func TestClasificacionPuntualVsRetardo(t *testing.T) {
-	router, _ := setupRouter(t)
+	router, _ := setupRouter(t, nuevoFakeRekognitionAutorizado())
 	token := crearNegocio(t, router, "Taqueria")
 	loc, _ := time.LoadLocation("America/Mazatlan")
 	ahora := time.Now().In(loc)
@@ -335,7 +331,7 @@ func TestClasificacionPuntualVsRetardo(t *testing.T) {
 }
 
 func TestReporteMarcaFaltaSinRegistro(t *testing.T) {
-	router, _ := setupRouter(t)
+	router, _ := setupRouter(t, nuevoFakeRekognitionAutorizado())
 	token := crearNegocio(t, router, "Taqueria")
 	loc, _ := time.LoadLocation("America/Mazatlan")
 	ayer := time.Now().In(loc).AddDate(0, 0, -1)
@@ -383,7 +379,7 @@ func TestReporteMarcaFaltaSinRegistro(t *testing.T) {
 // (SPEC.md sección 8): un negocio nunca debe ver empleados, turnos ni
 // reportes de otro, aunque ambos usen la API al mismo tiempo.
 func TestAislamientoEntreNegocios(t *testing.T) {
-	router, _ := setupRouter(t)
+	router, _ := setupRouter(t, nuevoFakeRekognitionAutorizado())
 	tokenA := crearNegocio(t, router, "NegocioA")
 	tokenB := crearNegocio(t, router, "NegocioB")
 
@@ -437,7 +433,7 @@ func TestAislamientoEntreNegocios(t *testing.T) {
 // de la PWA (SPEC.md sección 8): el marcaje debe registrarse con la hora en
 // que se capturó en la tablet, no con la hora en que llega al servidor.
 func TestMarcarManualConCapturadoEn(t *testing.T) {
-	router, _ := setupRouter(t)
+	router, _ := setupRouter(t, nuevoFakeRekognitionAutorizado())
 	token := crearNegocio(t, router, "Taqueria")
 	loc, _ := time.LoadLocation("America/Mazatlan")
 
@@ -512,5 +508,103 @@ func TestMarcarManualConCapturadoEn(t *testing.T) {
 	decode(t, reporteHoyRec, &reporteHoy)
 	if len(reporteHoy.Empleados) == 1 && reporteHoy.Empleados[0].Resumen.DiasTrabajados != 0 {
 		t.Fatalf("el registro se contó en el día de HOY en vez de en la fecha de captura: %+v", reporteHoy)
+	}
+}
+
+// TestEnrolarYMarcarConAwsSimulado ejercita /empleados/:id/enrolar y
+// /asistencia/marcar de punta a punta usando fakeRekognition en modo
+// autorizado: no llama a AWS de verdad, pero sí prueba el flujo completo de
+// reconocimiento facial (enrolar con una imagen, reconocer con la misma
+// imagen, fallar con una distinta) que las demás pruebas no cubren porque
+// dependían del SDK real.
+func TestEnrolarYMarcarConAwsSimulado(t *testing.T) {
+	router, _ := setupRouter(t, nuevoFakeRekognitionAutorizado())
+	token := crearNegocio(t, router, "Taqueria")
+
+	empRec := doJSON(t, router, token, http.MethodPost, "/empleados", map[string]interface{}{"nombre_completo": "Juan Perez"})
+	var empleado struct {
+		ID int `json:"id"`
+	}
+	decode(t, empRec, &empleado)
+
+	rostroJuan := base64.StdEncoding.EncodeToString([]byte("bytes-de-la-cara-de-juan"))
+	rostroDesconocido := base64.StdEncoding.EncodeToString([]byte("bytes-de-una-cara-distinta"))
+
+	// Enrolar: el "SDK" simulado indexa el rostro y devuelve un FaceId.
+	enrolarRec := doJSON(t, router, token, http.MethodPost, fmt.Sprintf("/empleados/%d/enrolar", empleado.ID), map[string]interface{}{
+		"imagen": rostroJuan,
+	})
+	if enrolarRec.Code != http.StatusOK {
+		t.Fatalf("enrolar: esperaba 200, obtuve %d (%s)", enrolarRec.Code, enrolarRec.Body.String())
+	}
+	var enrolado struct {
+		RekognitionFaceID string `json:"rekognition_face_id"`
+	}
+	decode(t, enrolarRec, &enrolado)
+	if enrolado.RekognitionFaceID == "" {
+		t.Fatalf("enrolar no devolvió rekognition_face_id: %s", enrolarRec.Body.String())
+	}
+
+	// Marcar con la MISMA imagen: el "SDK" simulado debe reconocer a Juan y
+	// registrarle una entrada.
+	marcarRec := doJSON(t, router, token, http.MethodPost, "/asistencia/marcar", map[string]interface{}{"imagen": rostroJuan})
+	if marcarRec.Code != http.StatusOK {
+		t.Fatalf("marcar (rostro conocido): esperaba 200, obtuve %d (%s)", marcarRec.Code, marcarRec.Body.String())
+	}
+	var reconocido struct {
+		EmpleadoID int    `json:"empleado_id"`
+		Tipo       string `json:"tipo"`
+	}
+	decode(t, marcarRec, &reconocido)
+	if reconocido.EmpleadoID != empleado.ID || reconocido.Tipo != "entrada" {
+		t.Fatalf("marcar reconoció mal al empleado: %+v", reconocido)
+	}
+
+	// Marcar con una imagen DISTINTA: nadie en la colección coincide, debe
+	// dar 404 "rostro no reconocido" (no 503 — Rekognition sí contestó).
+	noReconocidoRec := doJSON(t, router, token, http.MethodPost, "/asistencia/marcar", map[string]interface{}{"imagen": rostroDesconocido})
+	if noReconocidoRec.Code != http.StatusNotFound {
+		t.Fatalf("marcar (rostro desconocido): esperaba 404, obtuve %d (%s)", noReconocidoRec.Code, noReconocidoRec.Body.String())
+	}
+}
+
+// TestFallaCuandoAwsNoAutoriza simula que AWS rechaza las credenciales
+// (UnrecognizedClientException, el mismo error que se ve en los logs reales
+// cuando faltan o son inválidas) y comprueba que el sistema responde de
+// forma distinta a un "rostro no reconocido": 503 (servicio no disponible),
+// no 404 — para que el kiosco le diga a RH "revisa AWS" en vez de sugerir
+// que el empleado no está registrado.
+func TestFallaCuandoAwsNoAutoriza(t *testing.T) {
+	router, _ := setupRouter(t, nuevoFakeRekognitionSinAutorizacion())
+	token := crearNegocio(t, router, "Taqueria")
+
+	empRec := doJSON(t, router, token, http.MethodPost, "/empleados", map[string]interface{}{"nombre_completo": "Empleado Nuevo"})
+	var empleado struct {
+		ID int `json:"id"`
+	}
+	decode(t, empRec, &empleado)
+
+	imagen := base64.StdEncoding.EncodeToString([]byte("cualquier-imagen"))
+
+	enrolarRec := doJSON(t, router, token, http.MethodPost, fmt.Sprintf("/empleados/%d/enrolar", empleado.ID), map[string]interface{}{
+		"imagen": imagen,
+	})
+	if enrolarRec.Code != http.StatusServiceUnavailable {
+		t.Errorf("enrolar sin autorización de AWS: esperaba 503, obtuve %d (%s)", enrolarRec.Code, enrolarRec.Body.String())
+	}
+
+	marcarRec := doJSON(t, router, token, http.MethodPost, "/asistencia/marcar", map[string]interface{}{"imagen": imagen})
+	if marcarRec.Code != http.StatusServiceUnavailable {
+		t.Errorf("marcar sin autorización de AWS: esperaba 503 (no 404, para no confundirlo con 'rostro no reconocido'), obtuve %d (%s)", marcarRec.Code, marcarRec.Body.String())
+	}
+
+	// El registro manual (SPEC.md sección 8) no depende de Rekognition y
+	// debe seguir funcionando aunque AWS esté caído.
+	manualRec := doJSON(t, router, token, http.MethodPost, "/asistencia/marcar-manual", map[string]interface{}{
+		"empleado_id": empleado.ID,
+		"tipo":        "entrada",
+	})
+	if manualRec.Code != http.StatusOK {
+		t.Errorf("marcar-manual sin AWS: esperaba 200, obtuve %d (%s)", manualRec.Code, manualRec.Body.String())
 	}
 }

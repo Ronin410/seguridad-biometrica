@@ -11,6 +11,27 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/rekognition/types"
 )
 
+// FaceRecognizer es lo que los handlers necesitan de Rekognition. Separarlo
+// en una interfaz permite, en las pruebas, sustituir el SDK real de AWS por
+// un doble que simula tanto un reconocimiento exitoso como una autorización
+// de AWS rechazada — sin credenciales reales ni red.
+type FaceRecognizer interface {
+	EnsureCollection(ctx context.Context, collectionID string) error
+	IndexFace(ctx context.Context, collectionID string, imageBytes []byte, externalImageID string) (string, error)
+	SearchFace(ctx context.Context, collectionID string, imageBytes []byte, similarityThreshold float32) (faceID string, similarity float64, err error)
+}
+
+// ErrRostroNoDetectado: la imagen no tenía ningún rostro (problema de la
+// foto, no de Rekognition).
+var ErrRostroNoDetectado = errors.New("no se detectó ningún rostro en la imagen")
+
+// ErrRostroNoReconocido: Rekognition respondió pero ningún rostro de la
+// colección igualó al de la imagen (problema del reconocimiento, no de
+// Rekognition). Los handlers distinguen estos dos de cualquier otro error
+// (de red, de autorización de AWS, etc.) para no decirle "rostro no
+// reconocido" a un empleado cuando en realidad Rekognition no contestó.
+var ErrRostroNoReconocido = errors.New("rostro no reconocido")
+
 // Client envuelve el SDK de AWS Rekognition. Cada negocio (multi-negocio,
 // SPEC.md sección 8) tiene su propia colección de rostros, así que las
 // operaciones toman el collectionID como parámetro en vez de fijarlo una
@@ -18,6 +39,8 @@ import (
 type Client struct {
 	sdk *rekognition.Client
 }
+
+var _ FaceRecognizer = (*Client)(nil)
 
 func NewClient(ctx context.Context, region string) (*Client, error) {
 	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
@@ -63,7 +86,7 @@ func (c *Client) IndexFace(ctx context.Context, collectionID string, imageBytes 
 		return "", fmt.Errorf("indexando rostro: %w", err)
 	}
 	if len(result.FaceRecords) == 0 {
-		return "", fmt.Errorf("no se detectó ningún rostro en la imagen")
+		return "", ErrRostroNoDetectado
 	}
 
 	return *result.FaceRecords[0].Face.FaceId, nil
@@ -82,7 +105,7 @@ func (c *Client) SearchFace(ctx context.Context, collectionID string, imageBytes
 		return "", 0, fmt.Errorf("buscando rostro: %w", err)
 	}
 	if len(result.FaceMatches) == 0 {
-		return "", 0, fmt.Errorf("rostro no reconocido")
+		return "", 0, ErrRostroNoReconocido
 	}
 
 	match := result.FaceMatches[0]

@@ -159,7 +159,7 @@ Este repositorio contiene el **MVP** de StaffAttendance descrito en la sección 
 - PWA instalable (manifest + service worker) para correr en distintas tablets, con caché del shell para que el kiosco abra sin conexión.
 - Vista de asistencia del día en tiempo real (sección 6.3).
 - Reportes por empleado/periodo con exportación a CSV (sección 6.4).
-- Pruebas de integración contra Postgres real: flujo completo, puntualidad/retardo, aislamiento entre negocios, y sincronización offline.
+- Pruebas de integración contra Postgres real: flujo completo, puntualidad/retardo, aislamiento entre negocios, sincronización offline, y el reconocimiento facial simulado (sin credenciales de AWS ni red) tanto en modo autorizado como con la autorización de AWS rechazada — ver `StaffAttendanceBack/README.md`.
 
 **Aún no implementado:**
 

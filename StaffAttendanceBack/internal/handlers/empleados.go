@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"encoding/base64"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -14,10 +15,10 @@ import (
 
 type EmpleadosHandler struct {
 	DB  *sql.DB
-	Rek *rekognition.Client
+	Rek rekognition.FaceRecognizer
 }
 
-func NewEmpleadosHandler(db *sql.DB, rek *rekognition.Client) *EmpleadosHandler {
+func NewEmpleadosHandler(db *sql.DB, rek rekognition.FaceRecognizer) *EmpleadosHandler {
 	return &EmpleadosHandler{DB: db, Rek: rek}
 }
 
@@ -144,7 +145,14 @@ func (h *EmpleadosHandler) enrolar(c *gin.Context) {
 	externalImageID := strings.ReplaceAll(nombreCompleto, " ", "_") + "_" + empleadoID
 	faceID, err := h.Rek.IndexFace(c.Request.Context(), collectionID, imageBytes, externalImageID)
 	if err != nil {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+		if errors.Is(err, rekognition.ErrRostroNoDetectado) {
+			// Problema de la foto (mala luz, encuadre, etc.), no de Rekognition.
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "No se detectó ningún rostro en la imagen, intenta de nuevo"})
+		} else {
+			// Rekognition no contestó (red, autorización de AWS, etc.): no es
+			// culpa de la foto, así que no se presenta como tal.
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Rekognition no está disponible: " + err.Error()})
+		}
 		return
 	}
 

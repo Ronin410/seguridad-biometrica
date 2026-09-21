@@ -21,12 +21,12 @@ import (
 // (sección 6.4).
 type AsistenciaHandler struct {
 	DB                  *sql.DB
-	Rek                 *rekognition.Client
+	Rek                 rekognition.FaceRecognizer
 	Location            *time.Location
 	SimilarityThreshold float32
 }
 
-func NewAsistenciaHandler(db *sql.DB, rek *rekognition.Client, location *time.Location, similarityThreshold float32) *AsistenciaHandler {
+func NewAsistenciaHandler(db *sql.DB, rek rekognition.FaceRecognizer, location *time.Location, similarityThreshold float32) *AsistenciaHandler {
 	return &AsistenciaHandler{DB: db, Rek: rek, Location: location, SimilarityThreshold: similarityThreshold}
 }
 
@@ -73,7 +73,15 @@ func (h *AsistenciaHandler) marcar(c *gin.Context) {
 	negID := negocioID(c)
 	faceID, similarity, err := h.Rek.SearchFace(c.Request.Context(), rekognition.CollectionID(negID), imageBytes, h.SimilarityThreshold)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Rostro no reconocido"})
+		if errors.Is(err, rekognition.ErrRostroNoReconocido) {
+			// Rekognition sí contestó: de verdad no hay match en la colección.
+			c.JSON(http.StatusNotFound, gin.H{"error": "Rostro no reconocido"})
+		} else {
+			// Rekognition no contestó (red, autorización de AWS caída, etc.):
+			// no es lo mismo que "no te reconozco" — hay que usar el registro
+			// manual (SPEC.md sección 8), no reintentar con la cámara.
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "No se pudo contactar el reconocimiento facial, usa el registro manual"})
+		}
 		return
 	}
 
