@@ -7,7 +7,8 @@ MVP del backend de StaffAttendance, multi-negocio. Ver `../SPEC.md` para el spec
 Implementado:
 
 - Multi-negocio (sección 8): tabla `negocios`, `POST /negocios` da de alta un negocio nuevo junto con su primer usuario admin, y todo (`usuarios`, `turnos`, `empleados`, `registros_asistencia`) queda aislado por `negocio_id` — viene en el JWT y se filtra en cada consulta.
-- Autenticación JWT (`POST /login`, `POST /usuarios/registro` — este último ya autenticado, solo agrega usuarios al negocio del token).
+- Perfiles de acceso (sección 4): `admin` (todo) y `kiosco` (la tablet del mostrador — solo `/asistencia/*` y `GET /empleados` para el selector del registro manual). `middleware.RequireRol("admin")` protege cada ruta administrativa, así que el límite es real aunque alguien llame a la API directamente, no solo una pestaña oculta en la interfaz.
+- Autenticación JWT (`POST /login`, `POST /usuarios/registro` y `GET /usuarios` — ambos exclusivos de admin, para dar de alta y ver las cuentas del negocio, incluida la de la tablet).
 - CRUD de turnos (`POST/GET /turnos`) y de empleados (`POST/GET /empleados`, `PATCH /empleados/:id/estado`), enrolamiento facial (`POST /empleados/:id/enrolar`).
 - Un negocio, una colección de Rekognition (`empleados-asistencia-{negocio_id}`), igual que GuarderiaBiometric por guardería.
 - Marcaje de entrada/salida (sección 6.2): `POST /asistencia/marcar` reconoce el rostro, decide entrada/salida según el último registro del día y calcula puntualidad/retardo contra el turno asignado.
@@ -51,11 +52,17 @@ curl -X POST http://localhost:8100/negocios \
   -d '{"negocio_nombre":"Taquería El Buen Sabor","username":"admin","password":"..."}'
 ```
 
-Devuelve un token para usar de inmediato; el resto de los endpoints (`/empleados`, `/turnos`, `/asistencia/*`, `/reportes/*`) quedan aislados a ese negocio automáticamente.
+Devuelve un token para usar de inmediato; el resto de los endpoints (`/empleados`, `/turnos`, `/asistencia/*`, `/reportes/*`) quedan aislados a ese negocio automáticamente. Ese usuario es `admin`; para la tablet del mostrador, crea una cuenta `kiosco` ya autenticado:
+
+```bash
+curl -X POST http://localhost:8100/usuarios/registro \
+  -H "Authorization: Bearer $TOKEN_DEL_ADMIN" -H 'Content-Type: application/json' \
+  -d '{"username":"tablet1","password":"...","rol":"kiosco"}'
+```
 
 ## Pruebas
 
-`internal/handlers` tiene pruebas de integración contra un Postgres real (arman el router completo con `httptest`, autenticación real incluida). Si no hay una base disponible en `postgres://postgres:postgres@localhost:5432/staffattendance_test?sslmode=disable`, se saltan solas; para apuntarlas a otra base usa `TEST_DATABASE_URL`:
+`internal/handlers` tiene pruebas de integración contra un Postgres real (arman el router completo con `httptest`, autenticación real incluida, cubriendo también qué puede y no puede hacer cada perfil — `TestPerfilKioscoSoloAsistencia`). Si no hay una base disponible en `postgres://postgres:postgres@localhost:5432/staffattendance_test?sslmode=disable`, se saltan solas; para apuntarlas a otra base usa `TEST_DATABASE_URL`:
 
 ```bash
 createdb staffattendance_test

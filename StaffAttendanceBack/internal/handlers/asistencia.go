@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lib/pq"
 
+	"staffattendance/internal/middleware"
 	"staffattendance/internal/rekognition"
 )
 
@@ -30,11 +31,14 @@ func NewAsistenciaHandler(db *sql.DB, rek rekognition.FaceRecognizer, location *
 	return &AsistenciaHandler{DB: db, Rek: rek, Location: location, SimilarityThreshold: similarityThreshold}
 }
 
+// El marcaje (facial, manual y la vista de hoy) es lo único a lo que el
+// perfil "kiosco" tiene acceso; por eso queda sin restricción de rol aquí
+// (cualquier perfil autenticado puede usarlo). Reportes es exclusivo de admin.
 func (h *AsistenciaHandler) Register(router gin.IRouter) {
 	router.POST("/asistencia/marcar", h.marcar)
 	router.POST("/asistencia/marcar-manual", h.marcarManual)
 	router.GET("/asistencia/hoy", h.hoy)
-	router.GET("/reportes/asistencia", h.reporte)
+	router.GET("/reportes/asistencia", middleware.RequireRol("admin"), h.reporte)
 }
 
 type turnoInfo struct {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"staffattendance/internal/middleware"
 	"staffattendance/internal/models"
 	"staffattendance/internal/rekognition"
 )
@@ -23,10 +24,13 @@ func NewEmpleadosHandler(db *sql.DB, rek rekognition.FaceRecognizer) *EmpleadosH
 }
 
 func (h *EmpleadosHandler) Register(router gin.IRouter) {
-	router.POST("/empleados", h.crear)
+	admin := middleware.RequireRol("admin")
+	router.POST("/empleados", admin, h.crear)
+	// GET queda para cualquier perfil autenticado: el kiosco lo necesita para
+	// el selector de empleado del registro manual (SPEC.md sección 8).
 	router.GET("/empleados", h.listar)
-	router.PATCH("/empleados/:id/estado", h.cambiarEstado)
-	router.POST("/empleados/:id/enrolar", h.enrolar)
+	router.PATCH("/empleados/:id/estado", admin, h.cambiarEstado)
+	router.POST("/empleados/:id/enrolar", admin, h.enrolar)
 }
 
 func (h *EmpleadosHandler) crear(c *gin.Context) {

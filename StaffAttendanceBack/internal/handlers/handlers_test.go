@@ -608,3 +608,106 @@ func TestFallaCuandoAwsNoAutoriza(t *testing.T) {
 		t.Errorf("marcar-manual sin AWS: esperaba 200, obtuve %d (%s)", manualRec.Code, manualRec.Body.String())
 	}
 }
+
+// TestPerfilKioscoSoloAsistencia es la prueba central de los perfiles: una
+// tablet logueada como "kiosco" solo puede marcar asistencia (facial,
+// manual, ver "hoy" y listar empleados para el selector del registro
+// manual) — todo lo demás (empleados, turnos, reportes, usuarios) es
+// exclusivo de "admin".
+func TestPerfilKioscoSoloAsistencia(t *testing.T) {
+	router, _ := setupRouter(t, nuevoFakeRekognitionAutorizado())
+	adminToken := crearNegocio(t, router, "Taqueria")
+
+	empRec := doJSON(t, router, adminToken, http.MethodPost, "/empleados", map[string]interface{}{"nombre_completo": "Empleado Kiosco"})
+	var empleado struct {
+		ID int `json:"id"`
+	}
+	decode(t, empRec, &empleado)
+
+	// El admin da de alta la cuenta de la tablet.
+	kioscoRec := doJSON(t, router, adminToken, http.MethodPost, "/usuarios/registro", map[string]interface{}{
+		"username": "tablet_mostrador",
+		"password": "clave-de-la-tablet",
+		"rol":      "kiosco",
+	})
+	if kioscoRec.Code != http.StatusCreated {
+		t.Fatalf("crear usuario kiosco: esperaba 201, obtuve %d (%s)", kioscoRec.Code, kioscoRec.Body.String())
+	}
+
+	// Un rol inválido se rechaza antes de tocar la base de datos.
+	rolInvalidoRec := doJSON(t, router, adminToken, http.MethodPost, "/usuarios/registro", map[string]interface{}{
+		"username": "otro", "password": "x", "rol": "superadmin",
+	})
+	if rolInvalidoRec.Code != http.StatusBadRequest {
+		t.Errorf("rol inválido: esperaba 400, obtuve %d (%s)", rolInvalidoRec.Code, rolInvalidoRec.Body.String())
+	}
+
+	loginRec := doJSON(t, router, "", http.MethodPost, "/login", map[string]interface{}{
+		"username": "tablet_mostrador", "password": "clave-de-la-tablet",
+	})
+	var loginResp struct {
+		Token string `json:"token"`
+		Rol   string `json:"rol"`
+	}
+	decode(t, loginRec, &loginResp)
+	if loginResp.Rol != "kiosco" || loginResp.Token == "" {
+		t.Fatalf("login de la tablet no devolvió el rol/token esperado: %+v", loginResp)
+	}
+	kioscoToken := loginResp.Token
+
+	// Permitido para "kiosco": marcar (facial y manual), ver hoy, y listar
+	// empleados (lo usa el selector del registro manual).
+	permitido := []struct {
+		method, path string
+		body         interface{}
+	}{
+		{http.MethodGet, "/empleados", nil},
+		{http.MethodGet, "/asistencia/hoy", nil},
+		{http.MethodPost, "/asistencia/marcar-manual", map[string]interface{}{"empleado_id": empleado.ID, "tipo": "entrada"}},
+		{http.MethodPost, "/asistencia/marcar", map[string]interface{}{"imagen": base64.StdEncoding.EncodeToString([]byte("rostro-cualquiera"))}},
+	}
+	for _, caso := range permitido {
+		rec := doJSON(t, router, kioscoToken, caso.method, caso.path, caso.body)
+		if rec.Code == http.StatusForbidden {
+			t.Errorf("kiosco: %s %s debería estar permitido, dio 403 (%s)", caso.method, caso.path, rec.Body.String())
+		}
+	}
+
+	// Prohibido para "kiosco": todo lo administrativo.
+	prohibido := []struct {
+		method, path string
+		body         interface{}
+	}{
+		{http.MethodPost, "/empleados", map[string]interface{}{"nombre_completo": "Intento"}},
+		{http.MethodPatch, fmt.Sprintf("/empleados/%d/estado", empleado.ID), map[string]interface{}{"estado": "inactivo"}},
+		{http.MethodPost, fmt.Sprintf("/empleados/%d/enrolar", empleado.ID), map[string]interface{}{"imagen": "x"}},
+		{http.MethodPost, "/turnos", map[string]interface{}{"nombre": "x", "hora_entrada": "08:00:00", "hora_salida": "17:00:00"}},
+		{http.MethodGet, "/turnos", nil},
+		{http.MethodGet, "/reportes/asistencia", nil},
+		{http.MethodPost, "/usuarios/registro", map[string]interface{}{"username": "otro2", "password": "x"}},
+		{http.MethodGet, "/usuarios", nil},
+	}
+	for _, caso := range prohibido {
+		rec := doJSON(t, router, kioscoToken, caso.method, caso.path, caso.body)
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("kiosco: %s %s debería dar 403, dio %d (%s)", caso.method, caso.path, rec.Code, rec.Body.String())
+		}
+	}
+
+	// El admin sí puede ver la lista de usuarios del negocio, incluida la tablet.
+	usuariosRec := doJSON(t, router, adminToken, http.MethodGet, "/usuarios", nil)
+	var usuarios []struct {
+		Username string `json:"username"`
+		Rol      string `json:"rol"`
+	}
+	decode(t, usuariosRec, &usuarios)
+	encontrado := false
+	for _, u := range usuarios {
+		if u.Username == "tablet_mostrador" && u.Rol == "kiosco" {
+			encontrado = true
+		}
+	}
+	if !encontrado {
+		t.Fatalf("el admin no vio la cuenta de la tablet en /usuarios: %+v", usuarios)
+	}
+}

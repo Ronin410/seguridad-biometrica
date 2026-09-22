@@ -4,7 +4,9 @@ MVP del panel administrativo, PWA (React + Vite + Tailwind). Ver `../SPEC.md`.
 
 ## Estado
 
-Implementado: alta de negocio nuevo y login (multi-negocio, sección 8), gestión de empleados (alta, baja/reactivación, enrolamiento facial vía webcam), gestión de turnos, kiosco de marcaje (cámara + registro manual de respaldo) y reportes con exportación a CSV.
+Implementado: alta de negocio nuevo y login (multi-negocio, sección 8), gestión de empleados (alta, baja/reactivación, enrolamiento facial vía webcam), gestión de turnos, kiosco de marcaje (cámara + registro manual de respaldo), reportes con exportación a CSV, y gestión de usuarios/perfiles.
+
+**Perfiles (sección 4):** una cuenta `admin` ve las cinco pestañas (Kiosco, Empleados, Turnos, Reportes, Usuarios); una cuenta `kiosco` — la de la tablet del mostrador — solo ve Kiosco, sin ni siquiera el selector de pestañas. Esto es una comodidad de interfaz: el límite real está en el backend (`middleware.RequireRol`), así que un `kiosco` tampoco puede llegar a esas pantallas llamando a la API directamente. Un admin crea la cuenta de cada tablet desde la pestaña **Usuarios**.
 
 **PWA:** manifest + service worker (`public/manifest.json`, `public/sw.js`) para poder instalarse en cualquier tablet. El service worker solo cachea el shell de la app (nunca las llamadas a la API) para que el kiosco siga abriendo sin internet.
 

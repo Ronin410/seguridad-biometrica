@@ -23,9 +23,16 @@ func RunMigrations(conn *sql.DB) error {
 			negocio_id INTEGER NOT NULL REFERENCES negocios(id) ON DELETE CASCADE,
 			username VARCHAR(50) UNIQUE NOT NULL,
 			password_hash TEXT NOT NULL,
-			rol VARCHAR(20) NOT NULL DEFAULT 'admin' CHECK (rol IN ('admin', 'rh')),
+			rol VARCHAR(20) NOT NULL DEFAULT 'admin' CHECK (rol IN ('admin', 'kiosco')),
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		);`,
+
+		// Perfiles (esta sesión): antes solo existía 'rh', sin permisos propios.
+		// Se reemplaza por 'kiosco' — la tablet del mostrador, que solo puede
+		// marcar asistencia — dejando 'admin' con acceso a todo lo demás.
+		`UPDATE usuarios SET rol = 'admin' WHERE rol NOT IN ('admin', 'kiosco');`,
+		`ALTER TABLE usuarios DROP CONSTRAINT IF EXISTS usuarios_rol_check;`,
+		`ALTER TABLE usuarios ADD CONSTRAINT usuarios_rol_check CHECK (rol IN ('admin', 'kiosco'));`,
 
 		`CREATE TABLE IF NOT EXISTS turnos (
 			id SERIAL PRIMARY KEY,

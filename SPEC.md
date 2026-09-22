@@ -39,9 +39,18 @@ Confirmado: el reconocimiento facial usa AWS Rekognition (colecciones de rostros
 
 ## 4. Actores del Sistema
 
-- **Administrador/RH** — gestiona empleados, turnos, revisa y exporta reportes.
-- **Empleado** — solo interactúa con la cámara para marcar entrada/salida (no requiere login).
+- **Administrador/RH** — gestiona empleados, turnos, usuarios y revisa/exporta reportes. Único perfil que puede dar de alta la cuenta "kiosco" de una tablet.
+- **Empleado** — solo interactúa con la cámara para marcar entrada/salida (no requiere login propio; el marcaje lo hace la tablet en modo kiosco).
 - **Sistema** — procesa el reconocimiento y genera los registros automáticamente.
+
+**Perfiles de acceso (usuarios.rol):** cada tablet o persona que entra al panel inicia sesión como uno de dos perfiles, reforzados en el backend (no solo ocultos en la interfaz):
+
+| Perfil | Puede | No puede |
+|---|---|---|
+| `admin` | Todo: empleados, turnos, reportes, usuarios, y también marcar asistencia | — |
+| `kiosco` | Marcar asistencia (facial y manual) y ver la lista de empleados (para el selector del registro manual) | Crear/editar empleados, enrolar rostros, turnos, reportes, gestionar usuarios |
+
+La tablet del mostrador inicia sesión con una cuenta `kiosco`: solo ve la pantalla de Kiosco, sin acceso a ninguna otra sección aunque alguien intente llegar a ella directamente por la API.
 
 ## 5. Modelo de Datos (propuesto)
 
@@ -159,7 +168,8 @@ Este repositorio contiene el **MVP** de StaffAttendance descrito en la sección 
 - PWA instalable (manifest + service worker) para correr en distintas tablets, con caché del shell para que el kiosco abra sin conexión.
 - Vista de asistencia del día en tiempo real (sección 6.3).
 - Reportes por empleado/periodo con exportación a CSV (sección 6.4).
-- Pruebas de integración contra Postgres real: flujo completo, puntualidad/retardo, aislamiento entre negocios, sincronización offline, y el reconocimiento facial simulado (sin credenciales de AWS ni red) tanto en modo autorizado como con la autorización de AWS rechazada — ver `StaffAttendanceBack/README.md`.
+- Perfiles de acceso `admin`/`kiosco` (sección 4), reforzados en el backend en cada ruta (no solo ocultos en la interfaz): la tablet del mostrador solo puede marcar asistencia.
+- Pruebas de integración contra Postgres real: flujo completo, puntualidad/retardo, aislamiento entre negocios, sincronización offline, permisos por perfil, y el reconocimiento facial simulado (sin credenciales de AWS ni red) tanto en modo autorizado como con la autorización de AWS rechazada — ver `StaffAttendanceBack/README.md`.
 
 **Aún no implementado:**
 

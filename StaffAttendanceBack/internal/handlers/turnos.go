@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lib/pq"
 
+	"staffattendance/internal/middleware"
 	"staffattendance/internal/models"
 )
 
@@ -19,9 +20,11 @@ func NewTurnosHandler(db *sql.DB) *TurnosHandler {
 	return &TurnosHandler{DB: db}
 }
 
+// Turnos es exclusivo de admin: el kiosco no gestiona horarios.
 func (h *TurnosHandler) Register(router gin.IRouter) {
-	router.POST("/turnos", h.crear)
-	router.GET("/turnos", h.listar)
+	admin := middleware.RequireRol("admin")
+	router.POST("/turnos", admin, h.crear)
+	router.GET("/turnos", admin, h.listar)
 }
 
 func (h *TurnosHandler) crear(c *gin.Context) {

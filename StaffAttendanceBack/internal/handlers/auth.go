@@ -26,12 +26,15 @@ func (h *AuthHandler) RegisterPublic(router gin.IRouter) {
 	router.POST("/login", h.login)
 }
 
-// RegisterProtected monta /usuarios/registro: solo un admin ya autenticado
-// puede dar de alta más usuarios, y siempre dentro de su propio negocio (el
+// RegisterProtected monta /usuarios/registro y /usuarios: solo un admin ya
+// autenticado puede dar de alta o ver más usuarios (p. ej. la cuenta de una
+// tablet en modo kiosco), y siempre dentro de su propio negocio (el
 // negocio_id sale del token, nunca del body, para no permitir que un
 // negocio cree usuarios en otro).
 func (h *AuthHandler) RegisterProtected(router gin.IRouter) {
-	router.POST("/usuarios/registro", h.crearUsuario)
+	admin := middleware.RequireRol("admin")
+	router.POST("/usuarios/registro", admin, h.crearUsuario)
+	router.GET("/usuarios", admin, h.listarUsuarios)
 }
 
 func (h *AuthHandler) crearUsuario(c *gin.Context) {
@@ -46,6 +49,10 @@ func (h *AuthHandler) crearUsuario(c *gin.Context) {
 	}
 	if input.Rol == "" {
 		input.Rol = "admin"
+	}
+	if input.Rol != "admin" && input.Rol != "kiosco" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "El rol debe ser 'admin' o 'kiosco'"})
+		return
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(input.Password), bcrypt.DefaultCost)
@@ -64,6 +71,31 @@ func (h *AuthHandler) crearUsuario(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, gin.H{"message": "Usuario creado exitosamente"})
+}
+
+func (h *AuthHandler) listarUsuarios(c *gin.Context) {
+	rows, err := h.DB.Query(
+		`SELECT id, username, rol, created_at FROM usuarios WHERE negocio_id = $1 ORDER BY created_at ASC`,
+		negocioID(c),
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al consultar usuarios"})
+		return
+	}
+	defer rows.Close()
+
+	usuarios := []gin.H{}
+	for rows.Next() {
+		var id int
+		var username, rol string
+		var creadoEn time.Time
+		if err := rows.Scan(&id, &username, &rol, &creadoEn); err != nil {
+			continue
+		}
+		usuarios = append(usuarios, gin.H{"id": id, "username": username, "rol": rol, "creado_en": creadoEn})
+	}
+
+	c.JSON(http.StatusOK, usuarios)
 }
 
 func (h *AuthHandler) login(c *gin.Context) {

@@ -44,3 +44,23 @@ func Auth(jwtSecret []byte) gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// RequireRol restringe una ruta a ciertos roles. Va después de Auth() en la
+// cadena, así que ya puede leer "rol" del contexto. Dos perfiles hoy:
+// "admin" (todo) y "kiosco" (una tablet del mostrador que solo puede marcar
+// asistencia — no gestiona empleados, turnos, reportes ni usuarios).
+func RequireRol(roles ...string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		rolValue, _ := c.Get("rol")
+		rol, _ := rolValue.(string)
+
+		for _, permitido := range roles {
+			if rol == permitido {
+				c.Next()
+				return
+			}
+		}
+
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Tu perfil no tiene permiso para esta acción"})
+	}
+}
