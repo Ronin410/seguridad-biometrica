@@ -9,5 +9,18 @@
   },
   "enabledPlugins": {
     "agentes@alejandro-agentes": true
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/instalar-agentes.sh",
+            "timeout": 180
+          }
+        ]
+      }
+    ]
   }
 }

@@ -4,6 +4,8 @@ Control de asistencia de empleados por reconocimiento facial (AWS Rekognition), 
 
 Este proyecto usa *spec-driven development* con el plugin `agentes` (agentes `arquitecto`, `desarrollador` y `qa-seguridad`). Las specs viven en `specs/NNN-slug/`; la plantilla es `specs/_plantilla.md`. `SPEC.md` es el documento de producto original, no una spec del flujo.
 
+En sesiones web/móvil el plugin lo instala el hook `.claude/hooks/instalar-agentes.sh` al iniciar la sesión; como los plugins se cargan antes del hook, hay que escribir `/reload-plugins` una vez para usar `/agentes:*` en esa misma sesión.
+
 ## Stack
 
 - Backend (`StaffAttendanceBack/`): Go 1.24, Gin, JWT, `lib/pq` sobre PostgreSQL, AWS SDK v2 (Rekognition). Módulo `staffattendance`.
