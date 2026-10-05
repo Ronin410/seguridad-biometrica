@@ -1,0 +1,10 @@
+# Backend
+StaffAttendanceBack/.env
+
+# Frontend
+StaffAttendanceFront/node_modules/
+StaffAttendanceFront/dist/
+StaffAttendanceFront/.env
+
+# Docker Compose (raíz)
+.env
