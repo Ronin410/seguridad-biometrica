@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "alejandro-agentes": {
+      "source": {
+        "source": "github",
+        "repo": "ronin410/agentes"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "agentes@alejandro-agentes": true
+  }
+}
